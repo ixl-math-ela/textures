@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Roam Terrain Engine</title>
+
+<style>
+body{
+    margin:0;
+    overflow:hidden;
+    background:#87ceeb;
+}
+
+#info{
+    position:absolute;
+    top:10px;
+    left:10px;
+    padding:12px;
+    background:#0008;
+    color:white;
+    font-family:Arial;
+    border-radius:10px;
+}
+</style>
+
+</head>
+
+<body>
+
+<div id="info">
+Click to lock mouse<br>
+WASD = move<br>
+Space = up<br>
+Shift = down
+</div>
+
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.128/build/three.min.js"></script>
+
+
+<script>
+
+
+// ========================
+// BASIC ENGINE
+// ========================
+
+
+const scene = new THREE.Scene();
+
+scene.background =
+new THREE.Color(0x87ceeb);
+
+
+scene.fog =
+new THREE.Fog(
+0x87ceeb,
+100,
+600
+);
+
+
+
+const camera =
+new THREE.PerspectiveCamera(
+75,
+innerWidth/innerHeight,
+0.1,
+2000
+);
+
+
+
+camera.position.set(
+0,
+50,
+100
+);
+
+
+
+const renderer =
+new THREE.WebGLRenderer({
+antialias:true
+});
+
+
+renderer.shadowMap.enabled=true;
+
+renderer.shadowMap.type =
+THREE.PCFSoftShadowMap;
+
+
+renderer.setSize(
+innerWidth,
+innerHeight
+);
+
+
+document.body.appendChild(renderer.domElement);
+
+
+
+// ========================
+// LIGHTING
+// ========================
+
+
+let sun =
+new THREE.DirectionalLight(
+0xffffff,
+2
+);
+
+
+sun.position.set(
+150,
+200,
+100
+);
+
+
+sun.castShadow=true;
+
+
+sun.shadow.mapSize.width=2048;
+sun.shadow.mapSize.height=2048;
+
+
+scene.add(sun);
+
+
+
+scene.add(
+new THREE.HemisphereLight(
+0xffffff,
+0x445544,
+0.7
+)
+);
+
+
+
+
+// ========================
+// TEXTURES
+// ========================
+
+
+const loader =
+new THREE.TextureLoader();
+
+
+
+function texture(file){
+
+let t =
+loader.load(
+"textures/"+file
+);
+
+
+t.wrapS =
+THREE.RepeatWrapping;
+
+t.wrapT =
+THREE.RepeatWrapping;
+
+
+t.repeat.set(
+12,
+12
+);
+
+
+return t;
+
+}
+
+
+
+let color =
+texture(
+"Grass005_1K-PNG_Color.png"
+);
+
+
+let normal =
+texture(
+"Grass005_1K-PNG_NormalGL.png"
+);
+
+
+let roughness =
+texture(
+"Grass005_1K-PNG_Roughness.png"
+);
+
+
+let ao =
+texture(
+"Grass005_1K-PNG_AmbientOcclusion.png"
+);
+
+
+let displacement =
+texture(
+"Grass005_1K-PNG_Displacement.png"
+);
+
+
+
+
+// ========================
+// TERRAIN
+// ========================
+
+
+let size=500;
+
+
+let geometry =
+new THREE.PlaneGeometry(
+size,
+size,
+300,
+300
+);
+
+
+geometry.rotateX(
+-Math.PI/2
+);
+
+
+
+let vertices =
+geometry.attributes.position;
+
+
+
+// extra procedural hills
+
+for(
+let i=0;
+i<vertices.count;
+i++
+){
+
+let x =
+vertices.getX(i);
+
+let z =
+vertices.getZ(i);
+
+
+
+let height =
+Math.sin(x*0.03)*4 +
+Math.cos(z*0.04)*4 +
+Math.sin((x+z)*0.02)*8;
+
+
+
+vertices.setY(
+i,
+height
+);
+
+}
+
+
+
+geometry.computeVertexNormals();
+
+
+
+let material =
+new THREE.MeshStandardMaterial({
+
+map:color,
+
+normalMap:normal,
+
+roughnessMap:roughness,
+
+aoMap:ao,
+
+displacementMap:displacement,
+
+displacementScale:3,
+
+roughness:1
+
+});
+
+
+
+let terrain =
+new THREE.Mesh(
+geometry,
+material
+);
+
+
+terrain.receiveShadow=true;
+
+
+scene.add(terrain);
+
+
+
+
+// ========================
+// CONTROLS
+// ========================
+
+
+let keys={};
+
+
+document.onkeydown=e=>{
+keys[e.key.toLowerCase()]=true;
+};
+
+
+document.onkeyup=e=>{
+keys[e.key.toLowerCase()]=false;
+};
+
+
+
+let yaw=0;
+let pitch=0;
+
+
+
+document.body.onclick=()=>{
+
+document.body.requestPointerLock();
+
+};
+
+
+
+document.addEventListener(
+"mousemove",
+e=>{
+
+if(document.pointerLockElement){
+
+yaw -= e.movementX*0.002;
+
+pitch -= e.movementY*0.002;
+
+
+pitch=Math.max(
+-1.4,
+Math.min(
+1.4,
+pitch
+)
+);
+
+}
+
+});
+
+
+
+
+
+function update(){
+
+
+let move =
+new THREE.Vector3();
+
+
+if(keys["w"])
+move.z-=1;
+
+if(keys["s"])
+move.z+=1;
+
+if(keys["a"])
+move.x-=1;
+
+if(keys["d"])
+move.x+=1;
+
+
+move.normalize();
+
+
+
+move.applyAxisAngle(
+new THREE.Vector3(0,1,0),
+yaw
+);
+
+
+
+camera.position.add(
+move.multiplyScalar(1)
+);
+
+
+
+if(keys[" "])
+camera.position.y+=1;
+
+
+if(keys["shift"])
+camera.position.y-=1;
+
+
+
+camera.rotation.order="YXZ";
+
+camera.rotation.y=yaw;
+
+camera.rotation.x=pitch;
+
+
+}
+
+
+
+
+
+function animate(){
+
+requestAnimationFrame(
+animate
+);
+
+
+update();
+
+
+renderer.render(
+scene,
+camera
+);
+
+}
+
+
+animate();
+
+
+
+window.onresize=()=>{
+
+camera.aspect=
+innerWidth/innerHeight;
+
+
+camera.updateProjectionMatrix();
+
+
+renderer.setSize(
+innerWidth,
+innerHeight
+);
+
+};
+
+
+</script>
+
+
+</body>
+</html>
