@@ -8,7 +8,7 @@
         body {
             margin: 0;
             overflow: hidden;
-            background-color: #000;
+            background-color: #7ac175;
             font-family: sans-serif;
         }
         #instructions {
@@ -20,6 +20,7 @@
             padding: 15px;
             border-radius: 8px;
             pointer-events: none;
+            z-index: 10;
         }
     </style>
 </head>
@@ -28,77 +29,123 @@
     <div id="instructions">
         <h3>Controls:</h3>
         <p><b>W, A, S, D</b> - Move Around</p>
-        <p><b>Mouse</b> - Look Around (Click screen to lock pointer)</p>
+        <p><b>Mouse</b> - Look Around (Click screen to lock camera)</p>
     </div>
 
-    <!-- Include Three.js, PointerLockControls for FPS movement, and Perlin Noise library -->
+    <!-- Single Reliable Three.js CDN -->
     <script src="https://cloudflare.com"></script>
     <script src="https://jsdelivr.net"></script>
-    <script src="https://cloudflare.com"></script>
 
     <script>
-        // --- 1. Scene Setup ---
+        // --- 1. Embedded Math-Based Perlin Noise Engine ---
+        // Replacing josephg/noisejs CDN completely to prevent script loading blocks.
+        const Perlin = {
+            permutation: new Uint8Array(512),
+            init: function() {
+                const p = new Uint8Array(256);
+                for (let i = 0; i < 256; i++) p[i] = i;
+                // Shuffle
+                for (let i = 255; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    const tmp = p[i]; p[i] = p[j]; p[j] = tmp;
+                }
+                for (let i = 0; i < 256; i++) {
+                    this.permutation[i] = p[i];
+                    this.permutation[i + 256] = p[i];
+                }
+            },
+            fade: t => t * t * t * (t * (t * 6 - 15) + 10),
+            lerp: (t, a, b) => a + t * (b - a),
+            grad: (hash, x, y) => {
+                const h = hash & 7;
+                const u = h < 4 ? x : y;
+                const v = h < 4 ? y : x;
+                return ((h & 1) ? -u : u) + ((h & 2) ? -2.0 * v : 2.0 * v);
+            },
+            noise2D: function(x, z) {
+                const X = Math.floor(x) & 255;
+                const Z = Math.floor(z) & 255;
+                x -= Math.floor(x);
+                z -= Math.floor(z);
+                const u = this.fade(x);
+                const v = this.fade(z);
+                const aa = this.permutation[this.permutation[X] + Z];
+                const ab = this.permutation[this.permutation[X] + Z + 1];
+                const ba = this.permutation[this.permutation[X + 1] + Z];
+                const bb = this.permutation[this.permutation[X + 1] + Z + 1];
+                return this.lerp(v, this.lerp(u, this.grad(aa, x, z), this.grad(ba, x - 1, z)),
+                                    this.lerp(u, this.grad(ab, x, z - 1), this.grad(bb, x - 1, z - 1)));
+            }
+        };
+        Perlin.init();
+
+        // --- 2. Scene Setup ---
         const scene = new THREE.Scene();
-        scene.fog = new THREE.FogExp2(0x7ac175, 0.015); // Fog hides edge popping
+        scene.fog = new THREE.FogExp2(0x7ac175, 0.015);
 
         const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(0, 20, 0); // Start slightly above terrain
+        camera.position.set(0, 15, 0);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setClearColor(scene.fog.color);
-        renderer.shadowMap.enabled = true;
         document.body.appendChild(renderer.domElement);
 
-        // --- 2. Lighting ---
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        // --- 3. Lighting ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
         scene.add(ambientLight);
 
         const sunLight = new THREE.DirectionalLight(0xfffaed, 0.8);
         sunLight.position.set(100, 150, 50);
         scene.add(sunLight);
 
-        // --- 3. Load AmbientCG Textures ---
+        // --- 4. Fallback Procedural Material (Fixes Black Screen Issues) ---
+        // If image paths are broken or blocked by CORS, this displays procedural grass
         const textureLoader = new THREE.TextureLoader();
         
-        // Load the maps you provided
-        const colorTex = textureLoader.load('Grass005_1K-PNG_Color.png');
-        const roughnessTex = textureLoader.load('Grass005_1K-PNG_Roughness.png');
-        const aoTex = textureLoader.load('Grass005_1K-PNG_AmbientOcclusion.png');
-        const normalTex = textureLoader.load('Grass005_1K-PNG_NormalGL.png'); // GL is standard for Three.js
-        const displacementTex = textureLoader.load('Grass005_1K-PNG_Displacement.png');
-
-        // Configure texture wrapping for tiling
-        [colorTex, roughnessTex, aoTex, normalTex, displacementTex].forEach(tex => {
-            tex.wrapS = THREE.RepeatWrapping;
-            tex.wrapT = THREE.RepeatWrapping;
-            tex.repeat.set(5, 5); // Controls how detailed the grass looks per chunk
-        });
-
-        // Create standard PBR Material using your maps
         const terrainMaterial = new THREE.MeshStandardMaterial({
-            map: colorTex,
-            roughnessMap: roughnessTex,
-            aoMap: aoTex,
-            normalMap: normalTex,
-            displacementMap: displacementTex,
-            displacementScale: 2, // Controls strength of the texture bumps
-            roughness: 0.8
+            color: 0x557a46,
+            roughness: 0.9,
+            metalness: 0.1
         });
 
-        // --- 4. Infinite Terrain Logic (Chunking) ---
-        const chunkSize = 60;
-        const chunkSegments = 40; // Resolution of the terrain grid
-        const renderDistance = 4; // Number of chunks visible in any direction
-        const chunks = new Map(); // Store active meshes
+        // Safe loading wrapper for AmbientCG files
+        function loadTextureSafe(fileName, mapType) {
+            textureLoader.load(
+                fileName,
+                (texture) => {
+                    texture.wrapS = THREE.RepeatWrapping;
+                    texture.wrapT = THREE.RepeatWrapping;
+                    texture.repeat.set(8, 8);
+                    terrainMaterial[mapType] = texture;
+                    terrainMaterial.needsUpdate = true;
+                    if(mapType === 'displacementMap') {
+                        terrainMaterial.displacementScale = 1.5;
+                    }
+                },
+                undefined,
+                (err) => {
+                    console.warn(`Texture mapping skipped for: ${fileName}. Using procedural color fallback instead.`);
+                }
+            );
+        }
 
-        // Initialize seed for procedural Perlin Noise
-        noise.seed(Math.random());
+        // Trigger safe asynchronous texture injection
+        loadTextureSafe('Grass005_1K-PNG_Color.png', 'map');
+        loadTextureSafe('Grass005_1K-PNG_Roughness.png', 'roughnessMap');
+        loadTextureSafe('Grass005_1K-PNG_AmbientOcclusion.png', 'aoMap');
+        loadTextureSafe('Grass005_1K-PNG_NormalGL.png', 'normalMap');
+        loadTextureSafe('Grass005_1K-PNG_Displacement.png', 'displacementMap');
+
+        // --- 5. Infinite Terrain Logic (Chunking) ---
+        const chunkSize = 60;
+        const chunkSegments = 30; 
+        const renderDistance = 3; 
+        const chunks = new Map(); 
 
         function getHeight(x, z) {
-            // Layer multiple noise frequencies for realistic hills (octaves)
-            let y = noise.perlin2(x * 0.005, z * 0.005) * 25; // Big hills
-            y += noise.perlin2(x * 0.02, z * 0.02) * 5;       // Small bumps
+            let y = Perlin.noise2D(x * 0.006, z * 0.006) * 20; 
+            y += Perlin.noise2D(x * 0.03, z * 0.03) * 4;       
             return y;
         }
 
@@ -106,18 +153,16 @@
             const key = `${chunkX},${chunkZ}`;
             if (chunks.has(key)) return;
 
-            // Create flat plane grid
             const geometry = new THREE.PlaneGeometry(chunkSize, chunkSize, chunkSegments, chunkSegments);
-            geometry.rotateX(-Math.PI / 2); // Rotate to lie flat horizontally
+            geometry.rotateX(-Math.PI / 2); 
 
-            // Shift vertices using our height function
             const position = geometry.attributes.position;
             for (let i = 0; i < position.count; i++) {
                 const vx = position.getX(i) + (chunkX * chunkSize);
                 const vz = position.getZ(i) + (chunkZ * chunkSize);
                 position.setY(i, getHeight(vx, vz));
             }
-            geometry.computeVertexNormals(); // Fix lighting reflections
+            geometry.computeVertexNormals(); 
 
             const mesh = new THREE.Mesh(geometry, terrainMaterial);
             mesh.position.set(chunkX * chunkSize, 0, chunkZ * chunkSize);
@@ -126,13 +171,10 @@
         }
 
         function updateChunks() {
-            // Find which chunk the camera is currently standing on
             const currentChunkX = Math.floor((camera.position.x + chunkSize / 2) / chunkSize);
             const currentChunkZ = Math.floor((camera.position.z + chunkSize / 2) / chunkSize);
-
             const activeKeys = new Set();
 
-            // Spawn chunks in a grid around the player
             for (let x = -renderDistance; x <= renderDistance; x++) {
                 for (let z = -renderDistance; z <= renderDistance; z++) {
                     const cx = currentChunkX + x;
@@ -142,22 +184,18 @@
                 }
             }
 
-            // Remove chunks that are too far away to save memory
             for (const [key, mesh] of chunks.entries()) {
                 if (!activeKeys.has(key)) {
                     scene.remove(mesh);
-                    mesh.geometry.dispose(); // Free CPU/GPU memory
+                    mesh.geometry.dispose(); 
                     chunks.delete(key);
                 }
             }
         }
 
-        // --- 5. Controls & Movement ---
+        // --- 6. Controls & Movement ---
         const controls = new THREE.PointerLockControls(camera, document.body);
-        
-        document.body.addEventListener('click', () => {
-            controls.lock();
-        });
+        document.body.addEventListener('click', () => { controls.lock(); });
 
         const keys = { w: false, a: false, s: false, d: false };
         window.addEventListener('keydown', (e) => { if (e.key.toLowerCase() in keys) keys[e.key.toLowerCase()] = true; });
@@ -169,7 +207,7 @@
         function movePlayer(delta) {
             if (!controls.isLocked) return;
 
-            const speed = 40; 
+            const speed = 35; 
             velocity.set(0, 0, 0);
 
             if (keys.w) velocity.z -= speed * delta;
@@ -180,30 +218,26 @@
             controls.moveForward(-velocity.z);
             controls.moveRight(velocity.x);
 
-            // Snaps the camera height dynamically to match the rolling hills
             const currentHeight = getHeight(camera.position.x, camera.position.z);
-            camera.position.y = currentHeight + 4; // Keep player 4 units above grass
+            camera.position.y = currentHeight + 5; 
         }
 
-        // --- 6. Animation Loop ---
+        // --- 7. Animation Loop ---
         function animate() {
             requestAnimationFrame(animate);
-            
             const delta = clock.getDelta();
             movePlayer(delta);
             updateChunks();
-            
             renderer.render(scene, camera);
         }
 
-        // Handle browser window resizing
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
 
-        // Start loop
+        // Initialize Loop
         animate();
     </script>
 </body>
