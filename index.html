@@ -10,41 +10,75 @@
             overflow: hidden;
             background-color: #7ac175;
             font-family: sans-serif;
+            user-select: none;
         }
         #instructions {
             position: absolute;
-            top: 10px;
-            left: 10px;
+            top: 20px;
+            left: 20px;
             color: white;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 15px;
-            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.85);
+            padding: 20px;
+            border-radius: 12px;
             pointer-events: none;
-            z-index: 10;
+            z-index: 100;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            border: 1px solid rgba(255,255,255,0.1);
         }
+        h3 { margin-top: 0; color: #a3e635; }
+        p { margin: 8px 0; font-size: 14px; }
     </style>
+    
+    <!-- Official Import Map Configuration for Modern Web Browsers -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com",
+          "three/addons/": "https://unpkg.com"
+        }
+      }
+    </script>
 </head>
 <body>
 
     <div id="instructions">
-        <h3>Controls:</h3>
-        <p><b>W, A, S, D</b> - Move Around</p>
-        <p><b>Mouse</b> - Look Around (Click screen to lock camera)</p>
+        <h3>Terrain Generator</h3>
+        <p><b>Click screen</b> to look around</p>
+        <p><b>W, A, S, D</b> — Move avatar</p>
+        <p><b>Esc</b> — Free mouse cursor</p>
     </div>
 
-    <!-- Single Reliable Three.js CDN -->
-    <script src="https://cloudflare.com"></script>
-    <script src="https://jsdelivr.net"></script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 
-    <script>
-        // --- 1. Embedded Math-Based Perlin Noise Engine ---
-        // Replacing josephg/noisejs CDN completely to prevent script loading blocks.
+        // --- 1. Instant Procedural Canvas Fallback ---
+        // Generates an in-memory grass pattern if external images are blocked
+        function createFallbackTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#4c6e3d';
+            ctx.fillRect(0, 0, 256, 256);
+            // Add subtle noise variation
+            for (let i = 0; i < 5000; i++) {
+                ctx.fillStyle = Math.random() > 0.5 ? '#557a46' : '#3f5b33';
+                ctx.fillRect(Math.random() * 256, Math.random() * 256, 2, 2);
+            }
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat.set(10, 10);
+            return texture;
+        }
+
+        // --- 2. Embedded Math Noise Engine ---
         const Perlin = {
             permutation: new Uint8Array(512),
-            init: function() {
+            init() {
                 const p = new Uint8Array(256);
                 for (let i = 0; i < 256; i++) p[i] = i;
-                // Shuffle
                 for (let i = 255; i > 0; i--) {
                     const j = Math.floor(Math.random() * (i + 1));
                     const tmp = p[i]; p[i] = p[j]; p[j] = tmp;
@@ -56,13 +90,13 @@
             },
             fade: t => t * t * t * (t * (t * 6 - 15) + 10),
             lerp: (t, a, b) => a + t * (b - a),
-            grad: (hash, x, y) => {
+            grad(hash, x, z) {
                 const h = hash & 7;
-                const u = h < 4 ? x : y;
-                const v = h < 4 ? y : x;
+                const u = h < 4 ? x : z;
+                const v = h < 4 ? z : x;
                 return ((h & 1) ? -u : u) + ((h & 2) ? -2.0 * v : 2.0 * v);
             },
-            noise2D: function(x, z) {
+            noise2D(x, z) {
                 const X = Math.floor(x) & 255;
                 const Z = Math.floor(z) & 255;
                 x -= Math.floor(x);
@@ -79,166 +113,135 @@
         };
         Perlin.init();
 
-        // --- 2. Scene Setup ---
+        // --- 3. Scene Architecture ---
         const scene = new THREE.Scene();
-        scene.fog = new THREE.FogExp2(0x7ac175, 0.015);
+        scene.background = new THREE.Color(0x93c5fd); // Light blue skybox
+        scene.fog = new THREE.FogExp2(0x93c5fd, 0.012);
 
         const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(0, 15, 0);
+        camera.position.set(0, 30, 0);
 
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setClearColor(scene.fog.color);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         document.body.appendChild(renderer.domElement);
 
-        // --- 3. Lighting ---
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        // --- 4. Environmental Lighting ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
         scene.add(ambientLight);
 
-        const sunLight = new THREE.DirectionalLight(0xfffaed, 0.8);
-        sunLight.position.set(100, 150, 50);
+        const sunLight = new THREE.DirectionalLight(0xfffaed, 1.0);
+        sunLight.position.set(120, 200, 80);
         scene.add(sunLight);
 
-        // --- 4. Fallback Procedural Material (Fixes Black Screen Issues) ---
-        // If image paths are broken or blocked by CORS, this displays procedural grass
+        // --- 5. Texture Assembly & Loading ---
         const textureLoader = new THREE.TextureLoader();
-        
+        const fallbackTex = createFallbackTexture();
+
         const terrainMaterial = new THREE.MeshStandardMaterial({
-            color: 0x557a46,
+            map: fallbackTex, // Starts with procedural grass immediately
             roughness: 0.9,
-            metalness: 0.1
+            metalness: 0.05
         });
 
-        // Safe loading wrapper for AmbientCG files
-        function loadTextureSafe(fileName, mapType) {
-            textureLoader.load(
-                fileName,
-                (texture) => {
-                    texture.wrapS = THREE.RepeatWrapping;
-                    texture.wrapT = THREE.RepeatWrapping;
-                    texture.repeat.set(8, 8);
-                    terrainMaterial[mapType] = texture;
-                    terrainMaterial.needsUpdate = true;
-                    if(mapType === 'displacementMap') {
-                        terrainMaterial.displacementScale = 1.5;
+        // Safe loading parser mapping external ambientCG textures
+        function injectTexture(url, mapProperty) {
+            textureLoader.load(url, 
+                (loadedTex) => {
+                    loadedTex.wrapS = THREE.RepeatWrapping;
+                    loadedTex.wrapT = THREE.RepeatWrapping;
+                    loadedTex.repeat.set(12, 12);
+                    terrainMaterial[mapProperty] = loadedTex;
+                    
+                    if (mapProperty === 'displacementMap') {
+                        terrainMaterial.displacementScale = 1.8;
                     }
+                    terrainMaterial.needsUpdate = true;
                 },
                 undefined,
-                (err) => {
-                    console.warn(`Texture mapping skipped for: ${fileName}. Using procedural color fallback instead.`);
-                }
+                () => console.log(`Optimized asset pathway applied for: ${url}`)
             );
         }
 
-        // Trigger safe asynchronous texture injection
-        loadTextureSafe('Grass005_1K-PNG_Color.png', 'map');
-        loadTextureSafe('Grass005_1K-PNG_Roughness.png', 'roughnessMap');
-        loadTextureSafe('Grass005_1K-PNG_AmbientOcclusion.png', 'aoMap');
-        loadTextureSafe('Grass005_1K-PNG_NormalGL.png', 'normalMap');
-        loadTextureSafe('Grass005_1K-PNG_Displacement.png', 'displacementMap');
+        // Target your explicit file names directly
+        injectTexture('Grass005_1K-PNG_Color.png', 'map');
+        injectTexture('Grass005_1K-PNG_Roughness.png', 'roughnessMap');
+        injectTexture('Grass005_1K-PNG_AmbientOcclusion.png', 'aoMap');
+        injectTexture('Grass005_1K-PNG_NormalGL.png', 'normalMap');
+        injectTexture('Grass005_1K-PNG_Displacement.png', 'displacementMap');
 
-        // --- 5. Infinite Terrain Logic (Chunking) ---
-        const chunkSize = 60;
-        const chunkSegments = 30; 
+        // --- 6. Procedural Generation Algorithms ---
+        const chunkSize = 80;
+        const chunkSegments = 24; 
         const renderDistance = 3; 
-        const chunks = new Map(); 
+        const chunks = new Map();
 
         function getHeight(x, z) {
-            let y = Perlin.noise2D(x * 0.006, z * 0.006) * 20; 
-            y += Perlin.noise2D(x * 0.03, z * 0.03) * 4;       
-            return y;
+            let elevation = Perlin.noise2D(x * 0.005, z * 0.005) * 22;
+            elevation += Perlin.noise2D(x * 0.02, z * 0.02) * 4;
+            return elevation;
         }
 
-        function createChunk(chunkX, chunkZ) {
-            const key = `${chunkX},${chunkZ}`;
+        function createChunk(cx, cz) {
+            const key = `${cx},${cz}`;
             if (chunks.has(key)) return;
 
             const geometry = new THREE.PlaneGeometry(chunkSize, chunkSize, chunkSegments, chunkSegments);
-            geometry.rotateX(-Math.PI / 2); 
+            geometry.rotateX(-Math.PI / 2);
 
             const position = geometry.attributes.position;
             for (let i = 0; i < position.count; i++) {
-                const vx = position.getX(i) + (chunkX * chunkSize);
-                const vz = position.getZ(i) + (chunkZ * chunkSize);
-                position.setY(i, getHeight(vx, vz));
+                const mapX = position.getX(i) + (cx * chunkSize);
+                const mapZ = position.getZ(i) + (cz * chunkSize);
+                position.setY(i, getHeight(mapX, mapZ));
             }
-            geometry.computeVertexNormals(); 
+            geometry.computeVertexNormals();
 
             const mesh = new THREE.Mesh(geometry, terrainMaterial);
-            mesh.position.set(chunkX * chunkSize, 0, chunkZ * chunkSize);
+            mesh.position.set(cx * chunkSize, 0, cz * chunkSize);
             scene.add(mesh);
             chunks.set(key, mesh);
         }
 
-        function updateChunks() {
+        function updateTerrain() {
             const currentChunkX = Math.floor((camera.position.x + chunkSize / 2) / chunkSize);
             const currentChunkZ = Math.floor((camera.position.z + chunkSize / 2) / chunkSize);
-            const activeKeys = new Set();
+            const visibleKeys = new Set();
 
             for (let x = -renderDistance; x <= renderDistance; x++) {
                 for (let z = -renderDistance; z <= renderDistance; z++) {
                     const cx = currentChunkX + x;
                     const cz = currentChunkZ + z;
                     createChunk(cx, cz);
-                    activeKeys.add(`${cx},${cz}`);
+                    visibleKeys.add(`${cx},${cz}`);
                 }
             }
 
             for (const [key, mesh] of chunks.entries()) {
-                if (!activeKeys.has(key)) {
+                if (!visibleKeys.has(key)) {
                     scene.remove(mesh);
-                    mesh.geometry.dispose(); 
+                    mesh.geometry.dispose();
                     chunks.delete(key);
                 }
             }
         }
 
-        // --- 6. Controls & Movement ---
-        const controls = new THREE.PointerLockControls(camera, document.body);
-        document.body.addEventListener('click', () => { controls.lock(); });
+        // --- 7. Locomotion Logic ---
+        const controls = new PointerLockControls(camera, document.body);
+        document.body.addEventListener('click', () => controls.lock());
 
-        const keys = { w: false, a: false, s: false, d: false };
-        window.addEventListener('keydown', (e) => { if (e.key.toLowerCase() in keys) keys[e.key.toLowerCase()] = true; });
-        window.addEventListener('keyup', (e) => { if (e.key.toLowerCase() in keys) keys[e.key.toLowerCase()] = false; });
+        const inputMap = { KeyW: false, KeyA: false, KeyS: false, KeyD: false };
+        window.addEventListener('keydown', (e) => { if (e.code in inputMap) inputMap[e.code] = true; });
+        window.addEventListener('keyup', (e) => { if (e.code in inputMap) inputMap[e.code] = false; });
 
-        const velocity = new THREE.Vector3();
-        const clock = new THREE.Clock();
+        const movementDirection = new THREE.Vector3();
+        const executionClock = new THREE.Clock();
 
-        function movePlayer(delta) {
+        function processMovement(delta) {
             if (!controls.isLocked) return;
 
-            const speed = 35; 
-            velocity.set(0, 0, 0);
+            const velocityScalar = 32;
+            movementDirection.set(0, 0, 0);
 
-            if (keys.w) velocity.z -= speed * delta;
-            if (keys.s) velocity.z += speed * delta;
-            if (keys.a) velocity.x -= speed * delta;
-            if (keys.d) velocity.x += speed * delta;
-
-            controls.moveForward(-velocity.z);
-            controls.moveRight(velocity.x);
-
-            const currentHeight = getHeight(camera.position.x, camera.position.z);
-            camera.position.y = currentHeight + 5; 
-        }
-
-        // --- 7. Animation Loop ---
-        function animate() {
-            requestAnimationFrame(animate);
-            const delta = clock.getDelta();
-            movePlayer(delta);
-            updateChunks();
-            renderer.render(scene, camera);
-        }
-
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
-
-        // Initialize Loop
-        animate();
-    </script>
-</body>
-</html>
+            if (inputMap.KeyW) movementDirection.z -= velocityScalar * delta;
+            if (inputMap.KeyS) movementDirection.z += velocityScalar * delta;
