@@ -3,32 +3,34 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Infinite Terrain Generator</title>
+    <title>Infinite Grass Terrain</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         #ui {
             position: absolute;
             top: 20px;
             left: 20px;
             color: white;
-            background: rgba(0,0,0,0.7);
+            background: rgba(0,0,0,0.8);
             padding: 15px;
-            border-radius: 8px;
+            border-radius: 10px;
             pointer-events: none;
-            border: 1px solid #444;
+            border: 1px solid #333;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
         }
-        .controls { font-size: 12px; margin-top: 10px; color: #aaa; }
+        .coords { font-family: monospace; color: #4ade80; margin-top: 5px; }
+        .controls { font-size: 11px; margin-top: 10px; color: #999; line-height: 1.4; }
         canvas { display: block; }
     </style>
 </head>
 <body>
 
     <div id="ui">
-        <strong>Infinite Terrain Generator</strong>
-        <div id="coords">X: 0, Z: 0</div>
+        <strong>Infinite Terrain: Grass005</strong>
+        <div id="coords" class="coords">X: 0, Z: 0</div>
         <div class="controls">
-            W/S/A/D: Move | Mouse: Look<br>
-            Procedural Noise Chunks
+            WASD: Move | Click: Lock Mouse<br>
+            Using: Color, Normal, Roughness, AO, Height
         </div>
     </div>
 
@@ -36,88 +38,100 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     
     <script>
-        /**
-         * CONFIGURATION
-         * Replace these strings with your hosted Grass005 URLs to see your textures.
-         */
-        const TEXTURE_PATHS = {
-            color: '', // Grass005_1K-PNG_Color.png
-            normal: '', // Grass005_1K-PNG_NormalGL.png
-            roughness: '', // Grass005_1K-PNG_Roughness.png
-            ao: '', // Grass005_1K-PNG_AmbientOcclusion.png
-            displacement: '' // Grass005_1K-PNG_Displacement.png
+        // File Hierarchy Config (Everything in the same folder)
+        const TEXTURES = {
+            map: 'Grass005_1K-PNG_Color.png',
+            normalMap: 'Grass005_1K-PNG_NormalGL.png',
+            roughnessMap: 'Grass005_1K-PNG_Roughness.png',
+            aoMap: 'Grass005_1K-PNG_AmbientOcclusion.png',
+            displacementMap: 'Grass005_1K-PNG_Displacement.png'
         };
 
-        const CHUNK_SIZE = 40;
-        const SEGMENTS = 40;
-        const TERRAIN_HEIGHT = 10;
-        const RENDER_DISTANCE = 3; // Chunks in each direction
+        const CHUNK_SIZE = 50;
+        const SEGMENTS = 64; // Higher segments for better displacement mapping
+        const RENDER_DISTANCE = 2; // Chunks around the player
+        const TILING = 4; // How many times the texture repeats per chunk
 
-        let scene, camera, renderer, clock;
+        let scene, camera, renderer, clock, textureLoader;
         let chunks = new Map();
         let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
         let velocity = new THREE.Vector3();
         let direction = new THREE.Vector3();
+        let loadedTextures = {};
 
-        // Simple Noise Implementation (Sine-based hash for demo stability)
-        function noise(x, z) {
-            return (Math.sin(x * 0.1) * Math.sin(z * 0.1) * 2) + 
-                   (Math.sin(x * 0.05 + z * 0.02) * 4);
+        // Simple Sine-wave based noise for height variation
+        function getHeight(x, z) {
+            return (Math.sin(x * 0.05) * Math.cos(z * 0.05) * 3) + 
+                   (Math.sin(x * 0.1 + z * 0.1) * 1.5);
         }
 
         function init() {
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x87ceeb); // Sky blue
-            scene.fog = new THREE.Fog(0x87ceeb, 10, CHUNK_SIZE * (RENDER_DISTANCE + 1));
+            scene.background = new THREE.Color(0x111111); // Dark start
+            scene.fog = new THREE.Fog(0x111111, 20, CHUNK_SIZE * RENDER_DISTANCE);
 
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
             camera.position.y = 5;
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.physicallyCorrectLights = true; // Use physically based lighting
             document.body.appendChild(renderer.domElement);
 
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-            scene.add(ambientLight);
+            // Textures need second UV set for AO mapping in some Three.js versions
+            textureLoader = new THREE.TextureLoader();
+            loadAllTextures();
 
-            const sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
-            sunLight.position.set(50, 100, 50);
-            scene.add(sunLight);
+            // Lighting
+            const ambient = new THREE.AmbientLight(0xffffff, 0.4);
+            scene.add(ambient);
+
+            const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+            sun.position.set(10, 20, 10);
+            scene.add(sun);
 
             clock = new THREE.Clock();
 
             setupControls();
             window.addEventListener('resize', onWindowResize);
-            
             animate();
+        }
+
+        function loadAllTextures() {
+            Object.keys(TEXTURES).forEach(key => {
+                const tex = textureLoader.load(TEXTURES[key]);
+                tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+                tex.repeat.set(TILING, TILING);
+                loadedTextures[key] = tex;
+            });
         }
 
         function createChunk(x, z) {
             const geometry = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, SEGMENTS, SEGMENTS);
             geometry.rotateX(-Math.PI / 2);
 
-            const position = geometry.attributes.position;
-            for (let i = 0; i < position.count; i++) {
-                let px = position.getX(i) + x * CHUNK_SIZE;
-                let pz = position.getZ(i) + z * CHUNK_SIZE;
-                position.setY(i, noise(px, pz));
+            // Procedural height based on coordinates
+            const positions = geometry.attributes.position;
+            for (let i = 0; i < positions.count; i++) {
+                let px = positions.getX(i) + x * CHUNK_SIZE;
+                let pz = positions.getZ(i) + z * CHUNK_SIZE;
+                positions.setY(i, getHeight(px, pz));
             }
             geometry.computeVertexNormals();
 
-            // PBR Material Setup
+            // PBR Material using your Grass005 files
             const material = new THREE.MeshStandardMaterial({
-                color: TEXTURE_PATHS.color ? 0xffffff : 0x3d5e3a, // Use green if no texture
-                roughness: 0.8,
-                metalness: 0.1
+                map: loadedTextures.map,
+                normalMap: loadedTextures.normalMap,
+                roughnessMap: loadedTextures.roughnessMap,
+                aoMap: loadedTextures.aoMap,
+                displacementMap: loadedTextures.displacementMap,
+                displacementScale: 0.5, // Subtle height depth
+                roughness: 1.0,
+                metalness: 0.0
             });
 
-            // If user provides texture URLs, load them
-            const loader = new THREE.TextureLoader();
-            if (TEXTURE_PATHS.color) material.map = loader.load(TEXTURE_PATHS.color);
-            if (TEXTURE_PATHS.normal) material.normalMap = loader.load(TEXTURE_PATHS.normal);
-            if (TEXTURE_PATHS.roughness) material.roughnessMap = loader.load(TEXTURE_PATHS.roughness);
-            
             const mesh = new THREE.Mesh(geometry, material);
             mesh.position.set(x * CHUNK_SIZE, 0, z * CHUNK_SIZE);
             
@@ -125,19 +139,19 @@
         }
 
         function updateChunks() {
-            const currentChunkX = Math.round(camera.position.x / CHUNK_SIZE);
-            const currentChunkZ = Math.round(camera.position.z / CHUNK_SIZE);
+            const curX = Math.round(camera.position.x / CHUNK_SIZE);
+            const curZ = Math.round(camera.position.z / CHUNK_SIZE);
 
             document.getElementById('coords').innerText = `X: ${Math.floor(camera.position.x)}, Z: ${Math.floor(camera.position.z)}`;
 
-            const activeKeys = new Set();
+            const visibleKeys = new Set();
 
             for (let x = -RENDER_DISTANCE; x <= RENDER_DISTANCE; x++) {
                 for (let z = -RENDER_DISTANCE; z <= RENDER_DISTANCE; z++) {
-                    const cx = currentChunkX + x;
-                    const cz = currentChunkZ + z;
+                    const cx = curX + x;
+                    const cz = curZ + z;
                     const key = `${cx},${cz}`;
-                    activeKeys.add(key);
+                    visibleKeys.add(key);
 
                     if (!chunks.has(key)) {
                         const chunk = createChunk(cx, cz);
@@ -147,9 +161,9 @@
                 }
             }
 
-            // Clean up old chunks
+            // Remove chunks that are far away
             for (const [key, chunk] of chunks) {
-                if (!activeKeys.has(key)) {
+                if (!visibleKeys.has(key)) {
                     scene.remove(chunk);
                     chunk.geometry.dispose();
                     chunk.material.dispose();
@@ -159,39 +173,28 @@
         }
 
         function setupControls() {
-            const onKeyDown = (e) => {
-                switch (e.code) {
-                    case 'KeyW': moveForward = true; break;
-                    case 'KeyS': moveBackward = true; break;
-                    case 'KeyA': moveLeft = true; break;
-                    case 'KeyD': moveRight = true; break;
+            const handleKey = (val) => (e) => {
+                switch(e.code) {
+                    case 'KeyW': moveForward = val; break;
+                    case 'KeyS': moveBackward = val; break;
+                    case 'KeyA': moveLeft = val; break;
+                    case 'KeyD': moveRight = val; break;
                 }
             };
-            const onKeyUp = (e) => {
-                switch (e.code) {
-                    case 'KeyW': moveForward = false; break;
-                    case 'KeyS': moveBackward = false; break;
-                    case 'KeyA': moveLeft = false; break;
-                    case 'KeyD': moveRight = false; break;
-                }
-            };
-            document.addEventListener('keydown', onKeyDown);
-            document.addEventListener('keyup', onKeyUp);
+            document.addEventListener('keydown', handleKey(true));
+            document.addEventListener('keyup', handleKey(false));
 
-            // Simple mouse look
             let pitch = 0, yaw = 0;
             document.addEventListener('mousemove', (e) => {
                 if (document.pointerLockElement) {
                     yaw -= e.movementX * 0.002;
                     pitch -= e.movementY * 0.002;
-                    pitch = Math.max(-Math.PI/2, Math.min(Math.PI/2, pitch));
+                    pitch = Math.max(-1.5, Math.min(1.5, pitch));
                     camera.quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
                 }
             });
 
-            document.addEventListener('click', () => {
-                document.body.requestPointerLock();
-            });
+            document.addEventListener('click', () => document.body.requestPointerLock());
         }
 
         function onWindowResize() {
@@ -204,7 +207,7 @@
             requestAnimationFrame(animate);
             const delta = clock.getDelta();
 
-            // Movement logic
+            // Movement physics
             velocity.x -= velocity.x * 10.0 * delta;
             velocity.z -= velocity.z * 10.0 * delta;
 
@@ -218,15 +221,15 @@
             camera.translateX(-velocity.x * delta);
             camera.translateZ(velocity.z * delta);
             
-            // Keep player above ground
-            const groundHeight = noise(camera.position.x, camera.position.z);
-            camera.position.y = groundHeight + 2;
+            // Stay above terrain
+            const h = getHeight(camera.position.x, camera.position.z);
+            camera.position.y = THREE.MathUtils.lerp(camera.position.y, h + 2.5, 0.1);
 
             updateChunks();
             renderer.render(scene, camera);
         }
 
-        window.onload = init;
+        init();
     </script>
 </body>
 </html>
