@@ -3,46 +3,39 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Infinite PBR Grass Flight</title>
+    <title>Infinite Terrain</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
         #ui {
             position: absolute;
             top: 20px;
             left: 20px;
             color: white;
-            background: rgba(0,0,0,0.85);
-            padding: 20px;
-            border-radius: 12px;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border-radius: 8px;
             pointer-events: none;
-            border: 1px solid #555;
-            backdrop-filter: blur(8px);
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            border: 1px solid #444;
         }
-        .coords { font-family: 'Courier New', Courier, monospace; color: #4ade80; margin-top: 8px; font-size: 14px; font-weight: bold; }
-        .controls { font-size: 12px; margin-top: 12px; color: #ccc; line-height: 1.6; border-top: 1px solid #444; padding-top: 10px; }
-        .status { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+        .coords { font-family: monospace; color: #4ade80; margin-top: 5px; }
+        .controls { font-size: 11px; margin-top: 10px; color: #aaa; line-height: 1.4; }
         canvas { display: block; }
     </style>
 </head>
 <body>
 
     <div id="ui">
-        <div class="status">System Online</div>
-        <strong>Infinite PBR Terrain</strong>
+        <strong>Infinite Terrain</strong>
         <div id="coords" class="coords">X: 0, Y: 0, Z: 0</div>
         <div class="controls">
-            <strong>WASD</strong>: Fly Forward/Back/Strafe<br>
-            <strong>Q / E</strong>: Ascend / Descend Vertical<br>
-            <strong>Mouse</strong>: Look | <strong>Click</strong>: Engage Controls
+            WASD: Fly | Q/E: Up/Down<br>
+            Mouse: Look | Click: Lock
         </div>
     </div>
 
-    <!-- Three.js CDN -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     
     <script>
-        // Assets Mapping - All files in same hierarchy
         const ASSETS = {
             sky: 'DaySkyHDRI063B_1K_TONEMAPPED.jpg',
             color: 'Grass005_1K-PNG_Color.png',
@@ -52,11 +45,10 @@
             displacement: 'Grass005_1K-PNG_Displacement.png'
         };
 
-        // Tuning Constants
-        const CHUNK_SIZE = 80;
-        const SEGMENTS = 128; // Increased for high-fidelity displacement
+        const CHUNK_SIZE = 100;
+        const SEGMENTS = 160; 
         const RENDER_DISTANCE = 2; 
-        const TILING = 8; // Tighter tiling makes grass feel more detailed
+        const TILING = 12;
 
         let scene, camera, renderer, clock, loader;
         let chunks = new Map();
@@ -66,37 +58,40 @@
         function init() {
             scene = new THREE.Scene();
 
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2500);
-            camera.position.set(0, 15, 0);
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 3000);
+            camera.position.set(0, 20, 0);
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-            
-            // LIGHTING FIX: Control exposure to prevent white-out
+            renderer.setPixelRatio(window.devicePixelRatio);
             renderer.outputEncoding = THREE.sRGBEncoding;
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
-            renderer.toneMappingExposure = 0.6; // Lowered exposure for HDRI
+            renderer.toneMappingExposure = 0.45;
             
             document.body.appendChild(renderer.domElement);
 
             loader = new THREE.TextureLoader();
 
-            // Skybox Setup
             loader.load(ASSETS.sky, (tex) => {
                 tex.mapping = THREE.EquirectangularReflectionMapping;
                 scene.background = tex;
                 scene.environment = tex;
             });
 
-            loadPBRTextures();
+            const maps = ['color', 'normal', 'roughness', 'ao', 'displacement'];
+            maps.forEach(m => {
+                const t = loader.load(ASSETS[m]);
+                t.wrapS = t.wrapT = THREE.RepeatWrapping;
+                t.repeat.set(TILING, TILING);
+                t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+                textures[m] = t;
+            });
 
-            // Secondary Lighting for depth
-            const ambient = new THREE.AmbientLight(0xffffff, 0.2);
+            const ambient = new THREE.AmbientLight(0xffffff, 0.15);
             scene.add(ambient);
 
-            const sun = new THREE.DirectionalLight(0xffffff, 1.0);
-            sun.position.set(50, 100, 50);
+            const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+            sun.position.set(100, 200, 100);
             scene.add(sun);
 
             clock = new THREE.Clock();
@@ -106,25 +101,11 @@
             animate();
         }
 
-        function loadPBRTextures() {
-            const maps = ['color', 'normal', 'roughness', 'ao', 'displacement'];
-            maps.forEach(mapType => {
-                const t = loader.load(ASSETS[mapType === 'displacement' ? 'displacement' : mapType]);
-                t.wrapS = t.wrapT = THREE.RepeatWrapping;
-                t.repeat.set(TILING, TILING);
-                textures[mapType] = t;
-            });
-        }
-
-        // Procedural Base Terrain Shape
         function getBaseHeight(x, z) {
-            // Large rolling hills
-            return (Math.sin(x * 0.015) * Math.cos(z * 0.015) * 12) + 
-                   (Math.sin(x * 0.04) * 3);
+            return (Math.sin(x * 0.01) * Math.cos(z * 0.01) * 15) + (Math.sin(x * 0.03) * 4);
         }
 
         function createChunk(x, z) {
-            // Using more segments to allow the displacement map to actually push vertices
             const geometry = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, SEGMENTS, SEGMENTS);
             geometry.rotateX(-Math.PI / 2);
 
@@ -135,7 +116,6 @@
                 pos.setY(i, getBaseHeight(px, pz));
             }
             
-            // Required for AO mapping
             geometry.setAttribute('uv2', new THREE.BufferAttribute(geometry.attributes.uv.array, 2));
             geometry.computeVertexNormals();
 
@@ -145,14 +125,12 @@
                 roughnessMap: textures.roughness,
                 aoMap: textures.ao,
                 displacementMap: textures.displacement,
-                
-                // DISPLACEMENT PUMP: Stronger values for "real" grass feel
-                displacementScale: 4.5, 
-                displacementBias: -1.2,
-                
-                normalScale: new THREE.Vector2(2.5, 2.5), // Boost normals for shadow contrast
-                aoMapIntensity: 1.5,
-                roughness: 1.0
+                displacementScale: 9.0, 
+                displacementBias: -3.5,
+                normalScale: new THREE.Vector2(4.0, 4.0),
+                aoMapIntensity: 2.0,
+                roughness: 1.0,
+                metalness: 0.0
             });
 
             const mesh = new THREE.Mesh(geometry, material);
@@ -219,9 +197,8 @@
         function animate() {
             requestAnimationFrame(animate);
             const delta = clock.getDelta();
-            const flySpeed = 65.0;
+            const flySpeed = 80.0;
 
-            // Vector-based Flight Movement
             const moveDir = new THREE.Vector3();
             if (keys.w) moveDir.z -= 1;
             if (keys.s) moveDir.z += 1;
@@ -230,11 +207,9 @@
             
             moveDir.normalize();
 
-            // Directional flying (Relative to camera)
             camera.translateZ(moveDir.z * flySpeed * delta);
             camera.translateX(moveDir.x * flySpeed * delta);
 
-            // Vertical Override (Ascend/Descend)
             if (keys.q) camera.position.y += flySpeed * delta;
             if (keys.e) camera.position.y -= flySpeed * delta;
 
