@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Infinite Flight: Grass005 & HDRI</title>
+    <title>Infinite PBR Grass Flight</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', sans-serif; }
         #ui {
@@ -11,27 +11,30 @@
             top: 20px;
             left: 20px;
             color: white;
-            background: rgba(0,0,0,0.8);
-            padding: 15px;
-            border-radius: 10px;
+            background: rgba(0,0,0,0.85);
+            padding: 20px;
+            border-radius: 12px;
             pointer-events: none;
-            border: 1px solid #444;
-            backdrop-filter: blur(5px);
+            border: 1px solid #555;
+            backdrop-filter: blur(8px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
         }
-        .coords { font-family: monospace; color: #4ade80; margin-top: 5px; font-size: 14px; }
-        .controls { font-size: 11px; margin-top: 10px; color: #bbb; line-height: 1.5; }
+        .coords { font-family: 'Courier New', Courier, monospace; color: #4ade80; margin-top: 8px; font-size: 14px; font-weight: bold; }
+        .controls { font-size: 12px; margin-top: 12px; color: #ccc; line-height: 1.6; border-top: 1px solid #444; padding-top: 10px; }
+        .status { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
         canvas { display: block; }
     </style>
 </head>
 <body>
 
     <div id="ui">
-        <strong>Infinite Terrain Flight</strong>
+        <div class="status">System Online</div>
+        <strong>Infinite PBR Terrain</strong>
         <div id="coords" class="coords">X: 0, Y: 0, Z: 0</div>
         <div class="controls">
-            WASD: Fly Directionally<br>
-            Q / E: Ascend / Descend<br>
-            Mouse: Look Around | Click: Lock
+            <strong>WASD</strong>: Fly Forward/Back/Strafe<br>
+            <strong>Q / E</strong>: Ascend / Descend Vertical<br>
+            <strong>Mouse</strong>: Look | <strong>Click</strong>: Engage Controls
         </div>
     </div>
 
@@ -39,57 +42,61 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     
     <script>
-        // Assets Configuration (Same folder hierarchy)
+        // Assets Mapping - All files in same hierarchy
         const ASSETS = {
             sky: 'DaySkyHDRI063B_1K_TONEMAPPED.jpg',
             color: 'Grass005_1K-PNG_Color.png',
             normal: 'Grass005_1K-PNG_NormalGL.png',
             roughness: 'Grass005_1K-PNG_Roughness.png',
             ao: 'Grass005_1K-PNG_AmbientOcclusion.png',
-            height: 'Grass005_1K-PNG_Displacement.png'
+            displacement: 'Grass005_1K-PNG_Displacement.png'
         };
 
-        const CHUNK_SIZE = 60;
-        const SEGMENTS = 100; // High resolution for displacement mapping
-        const RENDER_DISTANCE = 3; 
-        const TILING = 6; // Repeat grass pattern
+        // Tuning Constants
+        const CHUNK_SIZE = 80;
+        const SEGMENTS = 128; // Increased for high-fidelity displacement
+        const RENDER_DISTANCE = 2; 
+        const TILING = 8; // Tighter tiling makes grass feel more detailed
 
         let scene, camera, renderer, clock, loader;
         let chunks = new Map();
         let keys = { w: false, a: false, s: false, d: false, q: false, e: false };
-        let velocity = new THREE.Vector3();
         let textures = {};
 
         function init() {
             scene = new THREE.Scene();
 
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
-            camera.position.set(0, 10, 0);
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2500);
+            camera.position.set(0, 15, 0);
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            
+            // LIGHTING FIX: Control exposure to prevent white-out
             renderer.outputEncoding = THREE.sRGBEncoding;
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 0.6; // Lowered exposure for HDRI
+            
             document.body.appendChild(renderer.domElement);
 
             loader = new THREE.TextureLoader();
 
-            // Load Sky HDRI
+            // Skybox Setup
             loader.load(ASSETS.sky, (tex) => {
                 tex.mapping = THREE.EquirectangularReflectionMapping;
                 scene.background = tex;
                 scene.environment = tex;
             });
 
-            loadGrassTextures();
+            loadPBRTextures();
 
-            // Lighting
-            const ambient = new THREE.AmbientLight(0xffffff, 0.3);
+            // Secondary Lighting for depth
+            const ambient = new THREE.AmbientLight(0xffffff, 0.2);
             scene.add(ambient);
 
-            const sun = new THREE.DirectionalLight(0xffffff, 1.2);
-            sun.position.set(100, 200, 100);
+            const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+            sun.position.set(50, 100, 50);
             scene.add(sun);
 
             clock = new THREE.Clock();
@@ -99,27 +106,28 @@
             animate();
         }
 
-        function loadGrassTextures() {
-            const texKeys = ['color', 'normal', 'roughness', 'ao', 'height'];
-            texKeys.forEach(key => {
-                const t = loader.load(ASSETS[key]);
+        function loadPBRTextures() {
+            const maps = ['color', 'normal', 'roughness', 'ao', 'displacement'];
+            maps.forEach(mapType => {
+                const t = loader.load(ASSETS[mapType === 'displacement' ? 'displacement' : mapType]);
                 t.wrapS = t.wrapT = THREE.RepeatWrapping;
                 t.repeat.set(TILING, TILING);
-                textures[key] = t;
+                textures[mapType] = t;
             });
         }
 
-        // Noise function for large scale terrain shape
+        // Procedural Base Terrain Shape
         function getBaseHeight(x, z) {
-            return (Math.sin(x * 0.02) * Math.cos(z * 0.02) * 10) + 
-                   (Math.sin(x * 0.05) * 2);
+            // Large rolling hills
+            return (Math.sin(x * 0.015) * Math.cos(z * 0.015) * 12) + 
+                   (Math.sin(x * 0.04) * 3);
         }
 
         function createChunk(x, z) {
+            // Using more segments to allow the displacement map to actually push vertices
             const geometry = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, SEGMENTS, SEGMENTS);
             geometry.rotateX(-Math.PI / 2);
 
-            // Set height for geometry and add uv2 for AO map
             const pos = geometry.attributes.position;
             for (let i = 0; i < pos.count; i++) {
                 let px = pos.getX(i) + x * CHUNK_SIZE;
@@ -127,9 +135,8 @@
                 pos.setY(i, getBaseHeight(px, pz));
             }
             
-            // AO Map requirement: second set of UVs
+            // Required for AO mapping
             geometry.setAttribute('uv2', new THREE.BufferAttribute(geometry.attributes.uv.array, 2));
-            
             geometry.computeVertexNormals();
 
             const material = new THREE.MeshStandardMaterial({
@@ -137,11 +144,15 @@
                 normalMap: textures.normal,
                 roughnessMap: textures.roughness,
                 aoMap: textures.ao,
-                displacementMap: textures.height,
-                displacementScale: 1.5, // Adds physical depth to grass
-                displacementBias: -0.5,
-                aoMapIntensity: 1.0,
-                normalScale: new THREE.Vector2(1.5, 1.5)
+                displacementMap: textures.displacement,
+                
+                // DISPLACEMENT PUMP: Stronger values for "real" grass feel
+                displacementScale: 4.5, 
+                displacementBias: -1.2,
+                
+                normalScale: new THREE.Vector2(2.5, 2.5), // Boost normals for shadow contrast
+                aoMapIntensity: 1.5,
+                roughness: 1.0
             });
 
             const mesh = new THREE.Mesh(geometry, material);
@@ -154,7 +165,7 @@
             const curZ = Math.round(camera.position.z / CHUNK_SIZE);
 
             document.getElementById('coords').innerText = 
-                `X: ${Math.floor(camera.position.x)}, Y: ${Math.floor(camera.position.y)}, Z: ${Math.floor(camera.position.z)}`;
+                `X: ${Math.floor(camera.position.x)} | Y: ${Math.floor(camera.position.y)} | Z: ${Math.floor(camera.position.z)}`;
 
             const visible = new Set();
             for (let x = -RENDER_DISTANCE; x <= RENDER_DISTANCE; x++) {
@@ -208,9 +219,9 @@
         function animate() {
             requestAnimationFrame(animate);
             const delta = clock.getDelta();
-            const speed = 50.0;
+            const flySpeed = 65.0;
 
-            // Free Flying Movement
+            // Vector-based Flight Movement
             const moveDir = new THREE.Vector3();
             if (keys.w) moveDir.z -= 1;
             if (keys.s) moveDir.z += 1;
@@ -219,13 +230,13 @@
             
             moveDir.normalize();
 
-            // Move relative to camera orientation
-            camera.translateZ(moveDir.z * speed * delta);
-            camera.translateX(moveDir.x * speed * delta);
+            // Directional flying (Relative to camera)
+            camera.translateZ(moveDir.z * flySpeed * delta);
+            camera.translateX(moveDir.x * flySpeed * delta);
 
-            // Vertical movement (Ascend/Descend)
-            if (keys.q) camera.position.y += speed * delta;
-            if (keys.e) camera.position.y -= speed * delta;
+            // Vertical Override (Ascend/Descend)
+            if (keys.q) camera.position.y += flySpeed * delta;
+            if (keys.e) camera.position.y -= flySpeed * delta;
 
             updateChunks();
             renderer.render(scene, camera);
