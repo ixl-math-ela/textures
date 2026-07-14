@@ -3,244 +3,230 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Modern Task Dashboard</title>
+    <title>Infinite Terrain Generator</title>
     <style>
-        :root {
-            --primary: #4f46e5;
-            --primary-hover: #4338ca;
-            --bg: #f8fafc;
-            --card-bg: #ffffff;
-            --text-main: #1e293b;
-            --text-muted: #64748b;
-            --border: #e2e8f0;
-            --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-        }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-        }
-
-        body {
-            background-color: var(--bg);
-            color: var(--text-main);
-            line-height: 1.5;
-            padding: 20px;
-        }
-
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-        }
-
-        header {
-            margin-bottom: 32px;
-            text-align: center;
-        }
-
-        h1 {
-            font-size: 2rem;
-            font-weight: 800;
-            color: var(--primary);
-            margin-bottom: 8px;
-        }
-
-        .input-group {
-            background: var(--card-bg);
-            padding: 16px;
-            border-radius: 12px;
-            display: flex;
-            gap: 12px;
-            box-shadow: var(--shadow);
-            margin-bottom: 24px;
-        }
-
-        input[type="text"] {
-            flex: 1;
-            padding: 12px 16px;
-            border: 1px solid var(--border);
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            background: rgba(0,0,0,0.7);
+            padding: 15px;
             border-radius: 8px;
-            outline: none;
-            font-size: 1rem;
-            transition: border-color 0.2s;
+            pointer-events: none;
+            border: 1px solid #444;
         }
-
-        input[type="text"]:focus {
-            border-color: var(--primary);
-        }
-
-        button.add-btn {
-            background-color: var(--primary);
-            color: white;
-            border: none;
-            padding: 0 24px;
-            border-radius: 8px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
-
-        button.add-btn:hover {
-            background-color: var(--primary-hover);
-        }
-
-        .task-list {
-            list-style: none;
-        }
-
-        .task-item {
-            background: var(--card-bg);
-            padding: 16px;
-            border-radius: 12px;
-            margin-bottom: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            box-shadow: var(--shadow);
-            transition: transform 0.1s;
-        }
-
-        .task-item:active {
-            transform: scale(0.99);
-        }
-
-        .task-info {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .checkbox {
-            width: 20px;
-            height: 20px;
-            cursor: pointer;
-        }
-
-        .task-text {
-            font-weight: 500;
-        }
-
-        .task-text.completed {
-            text-decoration: line-through;
-            color: var(--text-muted);
-        }
-
-        .delete-btn {
-            background: transparent;
-            color: #ef4444;
-            border: 1px solid #fee2e2;
-            padding: 6px 12px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 0.875rem;
-            transition: all 0.2s;
-        }
-
-        .delete-btn:hover {
-            background: #ef4444;
-            color: white;
-        }
-
-        /* Message Box instead of Alert */
-        #msg-box {
-            position: fixed;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: #1e293b;
-            color: white;
-            padding: 12px 24px;
-            border-radius: 99px;
-            font-size: 0.875rem;
-            display: none;
-            z-index: 1000;
-            box-shadow: var(--shadow);
-        }
-
-        @media (max-width: 600px) {
-            .input-group {
-                flex-direction: column;
-            }
-            button.add-btn {
-                padding: 12px;
-            }
-        }
+        .controls { font-size: 12px; margin-top: 10px; color: #aaa; }
+        canvas { display: block; }
     </style>
 </head>
 <body>
 
-    <div class="container">
-        <header>
-            <h1>Focus Flow</h1>
-            <p style="color: var(--text-muted)">Manage your daily rhythm.</p>
-        </header>
-
-        <div class="input-group">
-            <input type="text" id="task-input" placeholder="What needs to be done?">
-            <button class="add-btn" onclick="addTask()">Add Task</button>
+    <div id="ui">
+        <strong>Infinite Terrain Generator</strong>
+        <div id="coords">X: 0, Z: 0</div>
+        <div class="controls">
+            W/S/A/D: Move | Mouse: Look<br>
+            Procedural Noise Chunks
         </div>
-
-        <ul class="task-list" id="task-list">
-            <!-- Tasks appear here -->
-        </ul>
     </div>
 
-    <div id="msg-box"></div>
-
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
     <script>
-        const taskInput = document.getElementById('task-input');
-        const taskList = document.getElementById('task-list');
-        const msgBox = document.getElementById('msg-box');
-
-        function showMessage(text) {
-            msgBox.textContent = text;
-            msgBox.style.display = 'block';
-            setTimeout(() => {
-                msgBox.style.display = 'none';
-            }, 2500);
-        }
-
-        function addTask() {
-            const text = taskInput.value.trim();
-            if (!text) {
-                showMessage("Please enter a task first!");
-                return;
-            }
-
-            const li = document.createElement('li');
-            li.className = 'task-item';
-            li.innerHTML = `
-                <div class="task-info">
-                    <input type="checkbox" class="checkbox" onchange="toggleTask(this)">
-                    <span class="task-text">${text}</span>
-                </div>
-                <button class="delete-btn" onclick="this.parentElement.remove()">Delete</button>
-            `;
-
-            taskList.appendChild(li);
-            taskInput.value = '';
-            taskInput.focus();
-        }
-
-        function toggleTask(checkbox) {
-            const span = checkbox.nextElementSibling;
-            if (checkbox.checked) {
-                span.classList.add('completed');
-            } else {
-                span.classList.remove('completed');
-            }
-        }
-
-        // Allow 'Enter' key to add task
-        taskInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') addTask();
-        });
-
-        window.onload = () => {
-            console.log("Dashboard loaded and ready.");
+        /**
+         * CONFIGURATION
+         * Replace these strings with your hosted Grass005 URLs to see your textures.
+         */
+        const TEXTURE_PATHS = {
+            color: '', // Grass005_1K-PNG_Color.png
+            normal: '', // Grass005_1K-PNG_NormalGL.png
+            roughness: '', // Grass005_1K-PNG_Roughness.png
+            ao: '', // Grass005_1K-PNG_AmbientOcclusion.png
+            displacement: '' // Grass005_1K-PNG_Displacement.png
         };
+
+        const CHUNK_SIZE = 40;
+        const SEGMENTS = 40;
+        const TERRAIN_HEIGHT = 10;
+        const RENDER_DISTANCE = 3; // Chunks in each direction
+
+        let scene, camera, renderer, clock;
+        let chunks = new Map();
+        let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+        let velocity = new THREE.Vector3();
+        let direction = new THREE.Vector3();
+
+        // Simple Noise Implementation (Sine-based hash for demo stability)
+        function noise(x, z) {
+            return (Math.sin(x * 0.1) * Math.sin(z * 0.1) * 2) + 
+                   (Math.sin(x * 0.05 + z * 0.02) * 4);
+        }
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87ceeb); // Sky blue
+            scene.fog = new THREE.Fog(0x87ceeb, 10, CHUNK_SIZE * (RENDER_DISTANCE + 1));
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.y = 5;
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.body.appendChild(renderer.domElement);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            sunLight.position.set(50, 100, 50);
+            scene.add(sunLight);
+
+            clock = new THREE.Clock();
+
+            setupControls();
+            window.addEventListener('resize', onWindowResize);
+            
+            animate();
+        }
+
+        function createChunk(x, z) {
+            const geometry = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, SEGMENTS, SEGMENTS);
+            geometry.rotateX(-Math.PI / 2);
+
+            const position = geometry.attributes.position;
+            for (let i = 0; i < position.count; i++) {
+                let px = position.getX(i) + x * CHUNK_SIZE;
+                let pz = position.getZ(i) + z * CHUNK_SIZE;
+                position.setY(i, noise(px, pz));
+            }
+            geometry.computeVertexNormals();
+
+            // PBR Material Setup
+            const material = new THREE.MeshStandardMaterial({
+                color: TEXTURE_PATHS.color ? 0xffffff : 0x3d5e3a, // Use green if no texture
+                roughness: 0.8,
+                metalness: 0.1
+            });
+
+            // If user provides texture URLs, load them
+            const loader = new THREE.TextureLoader();
+            if (TEXTURE_PATHS.color) material.map = loader.load(TEXTURE_PATHS.color);
+            if (TEXTURE_PATHS.normal) material.normalMap = loader.load(TEXTURE_PATHS.normal);
+            if (TEXTURE_PATHS.roughness) material.roughnessMap = loader.load(TEXTURE_PATHS.roughness);
+            
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.position.set(x * CHUNK_SIZE, 0, z * CHUNK_SIZE);
+            
+            return mesh;
+        }
+
+        function updateChunks() {
+            const currentChunkX = Math.round(camera.position.x / CHUNK_SIZE);
+            const currentChunkZ = Math.round(camera.position.z / CHUNK_SIZE);
+
+            document.getElementById('coords').innerText = `X: ${Math.floor(camera.position.x)}, Z: ${Math.floor(camera.position.z)}`;
+
+            const activeKeys = new Set();
+
+            for (let x = -RENDER_DISTANCE; x <= RENDER_DISTANCE; x++) {
+                for (let z = -RENDER_DISTANCE; z <= RENDER_DISTANCE; z++) {
+                    const cx = currentChunkX + x;
+                    const cz = currentChunkZ + z;
+                    const key = `${cx},${cz}`;
+                    activeKeys.add(key);
+
+                    if (!chunks.has(key)) {
+                        const chunk = createChunk(cx, cz);
+                        scene.add(chunk);
+                        chunks.set(key, chunk);
+                    }
+                }
+            }
+
+            // Clean up old chunks
+            for (const [key, chunk] of chunks) {
+                if (!activeKeys.has(key)) {
+                    scene.remove(chunk);
+                    chunk.geometry.dispose();
+                    chunk.material.dispose();
+                    chunks.delete(key);
+                }
+            }
+        }
+
+        function setupControls() {
+            const onKeyDown = (e) => {
+                switch (e.code) {
+                    case 'KeyW': moveForward = true; break;
+                    case 'KeyS': moveBackward = true; break;
+                    case 'KeyA': moveLeft = true; break;
+                    case 'KeyD': moveRight = true; break;
+                }
+            };
+            const onKeyUp = (e) => {
+                switch (e.code) {
+                    case 'KeyW': moveForward = false; break;
+                    case 'KeyS': moveBackward = false; break;
+                    case 'KeyA': moveLeft = false; break;
+                    case 'KeyD': moveRight = false; break;
+                }
+            };
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+
+            // Simple mouse look
+            let pitch = 0, yaw = 0;
+            document.addEventListener('mousemove', (e) => {
+                if (document.pointerLockElement) {
+                    yaw -= e.movementX * 0.002;
+                    pitch -= e.movementY * 0.002;
+                    pitch = Math.max(-Math.PI/2, Math.min(Math.PI/2, pitch));
+                    camera.quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
+                }
+            });
+
+            document.addEventListener('click', () => {
+                document.body.requestPointerLock();
+            });
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+
+            // Movement logic
+            velocity.x -= velocity.x * 10.0 * delta;
+            velocity.z -= velocity.z * 10.0 * delta;
+
+            direction.z = Number(moveForward) - Number(moveBackward);
+            direction.x = Number(moveRight) - Number(moveLeft);
+            direction.normalize();
+
+            if (moveForward || moveBackward) velocity.z -= direction.z * 400.0 * delta;
+            if (moveLeft || moveRight) velocity.x -= direction.x * 400.0 * delta;
+
+            camera.translateX(-velocity.x * delta);
+            camera.translateZ(velocity.z * delta);
+            
+            // Keep player above ground
+            const groundHeight = noise(camera.position.x, camera.position.z);
+            camera.position.y = groundHeight + 2;
+
+            updateChunks();
+            renderer.render(scene, camera);
+        }
+
+        window.onload = init;
     </script>
 </body>
 </html>
