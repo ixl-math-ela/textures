@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Infinite Terrain</title>
+    <title>Terrain Simulation</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
         #ui {
@@ -11,21 +11,22 @@
             top: 20px;
             left: 20px;
             color: white;
-            background: rgba(0,0,0,0.8);
+            background: rgba(0,0,0,0.85);
             padding: 15px;
             border-radius: 8px;
             pointer-events: none;
             border: 1px solid #444;
+            backdrop-filter: blur(10px);
         }
-        .coords { font-family: monospace; color: #4ade80; margin-top: 5px; }
-        .controls { font-size: 11px; margin-top: 10px; color: #aaa; line-height: 1.4; }
+        .coords { font-family: monospace; color: #4ade80; margin-top: 5px; font-size: 14px; }
+        .controls { font-size: 11px; margin-top: 10px; color: #bbb; line-height: 1.5; }
         canvas { display: block; }
     </style>
 </head>
 <body>
 
     <div id="ui">
-        <strong>Infinite Terrain</strong>
+        <strong>Infinite 8K Grassland</strong>
         <div id="coords" class="coords">X: 0, Y: 0, Z: 0</div>
         <div class="controls">
             WASD: Fly | Q/E: Up/Down<br>
@@ -36,19 +37,20 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     
     <script>
+        const BASE_URL = 'https://github.com/ixl-math-ela/textures/releases/download/v1.0.0.0/';
         const ASSETS = {
             sky: 'DaySkyHDRI063B_1K_TONEMAPPED.jpg',
-            color: 'Grass005_1K-PNG_Color.png',
-            normal: 'Grass005_1K-PNG_NormalGL.png',
-            roughness: 'Grass005_1K-PNG_Roughness.png',
-            ao: 'Grass005_1K-PNG_AmbientOcclusion.png',
-            displacement: 'Grass005_1K-PNG_Displacement.png'
+            color: BASE_URL + 'Grass.jpg',
+            ao: BASE_URL + 'GrassA.jpg',
+            displacement: BASE_URL + 'GrassD.jpg',
+            normal: BASE_URL + 'GrassNGL.jpg',
+            roughness: BASE_URL + 'GrassR.jpg'
         };
 
-        const CHUNK_SIZE = 100;
-        const SEGMENTS = 160; 
+        const CHUNK_SIZE = 120;
+        const SEGMENTS = 180; 
         const RENDER_DISTANCE = 2; 
-        const TILING = 12;
+        const TILING = 1.5; 
 
         let scene, camera, renderer, clock, loader;
         let chunks = new Map();
@@ -58,19 +60,20 @@
         function init() {
             scene = new THREE.Scene();
 
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 3000);
-            camera.position.set(0, 20, 0);
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 4000);
+            camera.position.set(0, 30, 0);
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             renderer.outputEncoding = THREE.sRGBEncoding;
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
-            renderer.toneMappingExposure = 0.45;
+            renderer.toneMappingExposure = 0.35;
             
             document.body.appendChild(renderer.domElement);
 
             loader = new THREE.TextureLoader();
+            loader.setCrossOrigin('anonymous');
 
             loader.load(ASSETS.sky, (tex) => {
                 tex.mapping = THREE.EquirectangularReflectionMapping;
@@ -80,18 +83,19 @@
 
             const maps = ['color', 'normal', 'roughness', 'ao', 'displacement'];
             maps.forEach(m => {
-                const t = loader.load(ASSETS[m]);
-                t.wrapS = t.wrapT = THREE.RepeatWrapping;
-                t.repeat.set(TILING, TILING);
-                t.anisotropy = renderer.capabilities.getMaxAnisotropy();
-                textures[m] = t;
+                loader.load(ASSETS[m], (t) => {
+                    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+                    t.repeat.set(TILING, TILING);
+                    t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+                    textures[m] = t;
+                });
             });
 
-            const ambient = new THREE.AmbientLight(0xffffff, 0.15);
+            const ambient = new THREE.AmbientLight(0xffffff, 0.1);
             scene.add(ambient);
 
-            const sun = new THREE.DirectionalLight(0xffffff, 0.8);
-            sun.position.set(100, 200, 100);
+            const sun = new THREE.DirectionalLight(0xffffff, 0.7);
+            sun.position.set(200, 400, 200);
             scene.add(sun);
 
             clock = new THREE.Clock();
@@ -102,7 +106,7 @@
         }
 
         function getBaseHeight(x, z) {
-            return (Math.sin(x * 0.01) * Math.cos(z * 0.01) * 15) + (Math.sin(x * 0.03) * 4);
+            return (Math.sin(x * 0.008) * Math.cos(z * 0.008) * 20) + (Math.sin(x * 0.02) * 5);
         }
 
         function createChunk(x, z) {
@@ -125,12 +129,11 @@
                 roughnessMap: textures.roughness,
                 aoMap: textures.ao,
                 displacementMap: textures.displacement,
-                displacementScale: 9.0, 
-                displacementBias: -3.5,
-                normalScale: new THREE.Vector2(4.0, 4.0),
-                aoMapIntensity: 2.0,
-                roughness: 1.0,
-                metalness: 0.0
+                displacementScale: 15.0, 
+                displacementBias: -6.0,
+                normalScale: new THREE.Vector2(5.0, 5.0),
+                aoMapIntensity: 2.5,
+                roughness: 1.0
             });
 
             const mesh = new THREE.Mesh(geometry, material);
@@ -139,6 +142,8 @@
         }
 
         function updateChunks() {
+            if (!textures.color) return;
+
             const curX = Math.round(camera.position.x / CHUNK_SIZE);
             const curZ = Math.round(camera.position.z / CHUNK_SIZE);
 
@@ -197,7 +202,7 @@
         function animate() {
             requestAnimationFrame(animate);
             const delta = clock.getDelta();
-            const flySpeed = 80.0;
+            const flySpeed = 100.0;
 
             const moveDir = new THREE.Vector3();
             if (keys.w) moveDir.z -= 1;
