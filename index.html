@@ -3,73 +3,80 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>8K Infinite World</title>
+    <title>8K Terrain System</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #020202; font-family: sans-serif; }
-        #loader {
+        body { margin: 0; overflow: hidden; background: #000; font-family: monospace; }
+        #loader-screen {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: #000; display: flex; flex-direction: column;
             justify-content: center; align-items: center; z-index: 1000;
-            transition: opacity 0.8s ease;
+            color: #4ade80; transition: opacity 0.8s ease-out;
         }
-        #bar-bg { width: 280px; height: 2px; background: #111; margin-bottom: 10px; }
-        #bar-fill { width: 0%; height: 100%; background: #4ade80; transition: width 0.2s; }
-        #load-msg { color: #555; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }
+        #bar-container { width: 300px; height: 2px; background: #111; margin: 20px; border-radius: 2px; overflow: hidden; }
+        #bar { width: 0%; height: 100%; background: #4ade80; transition: width 0.4s; }
+        #status-msg { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 5px; }
+        #file-name { font-size: 9px; color: #666; }
         #ui {
-            position: absolute; top: 20px; left: 20px; color: #fff;
-            background: rgba(0,0,0,0.7); padding: 12px; border-radius: 4px;
-            pointer-events: none; display: none; font-family: monospace;
-            border-left: 3px solid #4ade80;
+            position: absolute; top: 20px; left: 20px;
+            color: white; background: rgba(0,0,0,0.9);
+            padding: 20px; border-radius: 2px; pointer-events: none;
+            display: none; border-left: 3px solid #4ade80;
         }
+        #coords { color: #4ade80; font-weight: bold; font-size: 14px; display: block; margin-bottom: 5px; }
     </style>
 </head>
 <body>
 
-    <div id="loader">
-        <div id="bar-bg"><div id="bar-fill"></div></div>
-        <div id="load-msg">Loading 8K Grassland... 0%</div>
+    <div id="loader-screen">
+        <div id="status-msg">SYNCHRONIZING 8K TEXTURES</div>
+        <div id="file-name">awaiting stream...</div>
+        <div id="bar-container"><div id="bar"></div></div>
     </div>
 
     <div id="ui">
-        <div id="pos">X: 0 Y: 0 Z: 0</div>
-        <div style="font-size: 9px; color: #888; margin-top: 5px;">WASD: MOVE | Q/E: UP/DOWN</div>
+        <span id="coords">X: 0 Y: 0 Z: 0</span>
+        <div style="font-size: 10px; color: #777; line-height: 1.6;">
+            W A S D : DIRECTIONAL FLIGHT<br>
+            Q / E : ALTITUDE ADJUST<br>
+            MOUSE : VIEWPORT ORIENTATION<br>
+            CLICK : CAPTURE CURSOR
+        </div>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
     <script>
-        const CONFIG = {
-            baseUrl: 'https://github.com/ixl-math-ela/textures/releases/download/v1.0.0.0/',
-            sky: 'DaySkyHDRI063B_1K_TONEMAPPED.jpg',
-            textures: {
-                color: 'Grass.jpg',
-                ao: 'GrassA.jpg',
-                disp: 'GrassD.jpg',
-                norm: 'GrassNGL.jpg',
-                rough: 'GrassR.jpg'
-            },
-            chunkSize: 180,
-            res: 140,
-            view: 2,
-            tiling: 0.15 
+        const BASE = 'https://github.com/ixl-math-ela/textures/releases/download/v1.0.0.0/';
+        const ASSETS = {
+            sky: BASE + 'DaySkyHDRI063B_1K_TONEMAPPED.jpg',
+            color: BASE + 'Grass.jpg',
+            ao: BASE + 'GrassA.jpg',
+            displacement: BASE + 'GrassD.jpg',
+            normal: BASE + 'GrassNGL.jpg',
+            roughness: BASE + 'GrassR.jpg'
         };
+
+        const CHUNK_SIZE = 180;
+        const SEGMENTS = 140; 
+        const RENDER_DISTANCE = 2; 
 
         let scene, camera, renderer, clock, manager;
         let chunks = new Map();
-        let active = false;
-        let keys = {};
-        let maps = {};
+        let keys = { w: false, a: false, s: false, d: false, q: false, e: false };
+        let textures = {};
+        let isReady = false;
 
         function init() {
             scene = new THREE.Scene();
-            camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 1, 10000);
-            camera.position.set(0, 100, 0);
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 15000);
+            camera.position.set(0, 120, 0);
 
             renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             renderer.outputEncoding = THREE.sRGBEncoding;
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
-            renderer.toneMappingExposure = 0.45;
+            renderer.toneMappingExposure = 0.4;
             document.body.appendChild(renderer.domElement);
 
             manager = new THREE.LoadingManager();
@@ -77,124 +84,135 @@
             loader.setCrossOrigin('anonymous');
 
             manager.onProgress = (url, loaded, total) => {
-                const p = Math.floor((loaded / total) * 100);
-                document.getElementById('bar-fill').style.width = p + '%';
-                document.getElementById('load-msg').innerText = `Syncing High-Res Buffer: ${p}%`;
+                const name = url.split('/').pop();
+                document.getElementById('file-name').innerText = `FETCHING: ${name}`;
+                document.getElementById('bar').style.width = (loaded / total * 100) + '%';
             };
 
             manager.onLoad = () => {
-                document.getElementById('loader').style.opacity = '0';
-                document.getElementById('ui').style.display = 'block';
+                document.getElementById('status-msg').innerText = "STREAM COMPLETE";
+                document.getElementById('file-name').innerText = "INITIALIZING WORLD SPACE...";
+                
                 setTimeout(() => {
-                    document.getElementById('loader').remove();
-                    active = true;
-                }, 800);
+                    document.getElementById('loader-screen').style.opacity = '0';
+                    document.getElementById('ui').style.display = 'block';
+                    isReady = true;
+                    setTimeout(() => document.getElementById('loader-screen').remove(), 500);
+                }, 1000);
             };
 
-            loader.load(CONFIG.sky, (t) => {
+            loader.load(ASSETS.sky, (t) => {
                 t.mapping = THREE.EquirectangularReflectionMapping;
                 scene.background = t;
                 scene.environment = t;
             });
 
-            Object.keys(CONFIG.textures).forEach(key => {
-                loader.load(CONFIG.baseUrl + CONFIG.textures[key], (t) => {
+            const maps = ['color', 'normal', 'roughness', 'ao', 'displacement'];
+            maps.forEach(m => {
+                loader.load(ASSETS[m], (t) => {
                     t.wrapS = t.wrapT = THREE.RepeatWrapping;
-                    t.repeat.set(CONFIG.tiling, CONFIG.tiling);
+                    t.repeat.set(1.5, 1.5);
                     t.anisotropy = renderer.capabilities.getMaxAnisotropy();
-                    maps[key] = t;
-                }, undefined, () => {
-                    console.warn("Texture Failed (CORS)");
+                    textures[m] = t;
                 });
             });
 
+            scene.add(new THREE.AmbientLight(0xffffff, 0.15));
             const sun = new THREE.DirectionalLight(0xffffff, 0.8);
-            sun.position.set(500, 1000, 500);
+            sun.position.set(1000, 2000, 1000);
             scene.add(sun);
-            scene.add(new THREE.AmbientLight(0xffffff, 0.1));
 
             clock = new THREE.Clock();
-            window.addEventListener('resize', onResize);
-            window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
-            window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
-            
-            let pitch = 0, yaw = 0;
-            document.addEventListener('mousemove', e => {
-                if (document.pointerLockElement) {
-                    yaw -= e.movementX * 0.002;
-                    pitch -= e.movementY * 0.002;
-                    pitch = Math.max(-1.5, Math.min(1.5, pitch));
-                    camera.quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
-                }
-            });
-            document.addEventListener('mousedown', () => { if(active) document.body.requestPointerLock(); });
-
+            setupControls();
+            window.addEventListener('resize', onWindowResize);
             animate();
         }
 
-        function getH(x, z) {
-            return (Math.sin(x * 0.004) * Math.cos(z * 0.004) * 60) + (Math.sin(x * 0.01) * 10);
+        function getBaseHeight(x, z) {
+            return (Math.sin(x * 0.002) * Math.cos(z * 0.002) * 80) + (Math.sin(x * 0.01) * 20);
         }
 
         function createChunk(x, z) {
-            const geo = new THREE.PlaneGeometry(CONFIG.chunkSize, CONFIG.chunkSize, CONFIG.res, CONFIG.res);
-            geo.rotateX(-Math.PI / 2);
-            const p = geo.attributes.position;
-            for (let i = 0; i < p.count; i++) {
-                let px = p.getX(i) + x * CONFIG.chunkSize;
-                let pz = p.getZ(i) + z * CONFIG.chunkSize;
-                p.setY(i, getH(px, pz));
-            }
-            geo.setAttribute('uv2', new THREE.BufferAttribute(geo.attributes.uv.array, 2));
-            geo.computeVertexNormals();
+            const geometry = new THREE.PlaneGeometry(CHUNK_SIZE, CHUNK_SIZE, SEGMENTS, SEGMENTS);
+            geometry.rotateX(-Math.PI / 2);
 
-            const mat = new THREE.MeshStandardMaterial({
-                color: maps.color ? 0xffffff : 0x223311,
-                map: maps.color || null,
-                normalMap: maps.norm || null,
-                roughnessMap: maps.rough || null,
-                aoMap: maps.ao || null,
-                displacementMap: maps.disp || null,
-                displacementScale: 45, 
-                displacementBias: -15,
-                normalScale: new THREE.Vector2(8, 8),
-                roughness: 0.9,
+            const pos = geometry.attributes.position;
+            for (let i = 0; i < pos.count; i++) {
+                let px = pos.getX(i) + x * CHUNK_SIZE;
+                let pz = pos.getZ(i) + z * CHUNK_SIZE;
+                pos.setY(i, getBaseHeight(px, pz));
+            }
+            
+            geometry.setAttribute('uv2', new THREE.BufferAttribute(geometry.attributes.uv.array, 2));
+            geometry.computeVertexNormals();
+
+            const material = new THREE.MeshStandardMaterial({
+                map: textures.color,
+                normalMap: textures.normal,
+                roughnessMap: textures.roughness,
+                aoMap: textures.ao,
+                displacementMap: textures.displacement,
+                displacementScale: 55.0, 
+                displacementBias: -20.0,
+                normalScale: new THREE.Vector2(15, 15),
+                aoMapIntensity: 5.0,
+                roughness: 1.0,
                 metalness: 0.0
             });
 
-            const m = new THREE.Mesh(geo, mat);
-            m.position.set(x * CONFIG.chunkSize, 0, z * CONFIG.chunkSize);
-            return m;
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.position.set(x * CHUNK_SIZE, 0, z * CHUNK_SIZE);
+            return mesh;
         }
 
-        function update() {
-            const cx = Math.round(camera.position.x / CONFIG.chunkSize);
-            const cz = Math.round(camera.position.z / CONFIG.chunkSize);
-            document.getElementById('pos').innerText = `X: ${Math.floor(camera.position.x)} Y: ${Math.floor(camera.position.y)} Z: ${Math.floor(camera.position.z)}`;
+        function updateChunks() {
+            if (!isReady) return;
+            const curX = Math.round(camera.position.x / CHUNK_SIZE);
+            const curZ = Math.round(camera.position.z / CHUNK_SIZE);
 
-            const current = new Set();
-            for (let i = -CONFIG.view; i <= CONFIG.view; i++) {
-                for (let j = -CONFIG.view; j <= CONFIG.view; j++) {
-                    const k = `${cx + i},${cz + j}`;
-                    current.add(k);
-                    if (!chunks.has(k)) {
-                        const c = createChunk(cx + i, cz + j);
-                        scene.add(c);
-                        chunks.set(k, c);
+            document.getElementById('coords').innerText = 
+                `X: ${Math.floor(camera.position.x)} Y: ${Math.floor(camera.position.y)} Z: ${Math.floor(camera.position.z)}`;
+
+            const visible = new Set();
+            for (let x = -RENDER_DISTANCE; x <= RENDER_DISTANCE; x++) {
+                for (let z = -RENDER_DISTANCE; z <= RENDER_DISTANCE; z++) {
+                    const key = `${curX + x},${curZ + z}`;
+                    visible.add(key);
+                    if (!chunks.has(key)) {
+                        const chunk = createChunk(curX + x, curZ + z);
+                        scene.add(chunk);
+                        chunks.set(key, chunk);
                     }
                 }
             }
-            chunks.forEach((c, k) => {
-                if (!current.has(k)) {
-                    scene.remove(c);
-                    c.geometry.dispose();
-                    c.material.dispose();
-                    chunks.delete(k);
+
+            chunks.forEach((chunk, key) => {
+                if (!visible.has(key)) {
+                    scene.remove(chunk);
+                    chunk.geometry.dispose();
+                    chunk.material.dispose();
+                    chunks.delete(key);
                 }
             });
         }
 
-        function onResize() {
+        function setupControls() {
+            document.addEventListener('keydown', (e) => { keys[e.key.toLowerCase()] = true; });
+            document.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
+
+            let pitch = 0, yaw = 0;
+            document.addEventListener('mousemove', (e) => {
+                if (document.pointerLockElement) {
+                    yaw -= e.movementX * 0.0015;
+                    pitch -= e.movementY * 0.0015;
+                    pitch = Math.max(-Math.PI/2, Math.min(Math.PI/2, pitch));
+                    camera.quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
+                }
+            });
+            document.body.onclick = () => document.body.requestPointerLock();
+        }
+
+        function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
@@ -202,20 +220,26 @@
 
         function animate() {
             requestAnimationFrame(animate);
-            if (!active) return;
-            const dt = clock.getDelta();
-            const s = 220;
-            const d = new THREE.Vector3();
-            if (keys.w) d.z -= 1; if (keys.s) d.z += 1;
-            if (keys.a) d.x -= 1; if (keys.d) d.x += 1;
-            d.normalize();
-            camera.translateZ(d.z * s * dt);
-            camera.translateX(d.x * s * dt);
-            if (keys.q) camera.position.y += s * dt;
-            if (keys.e) camera.position.y -= s * dt;
-            update();
+            if (!isReady) return;
+
+            const delta = clock.getDelta();
+            const flySpeed = 220.0;
+            const moveDir = new THREE.Vector3();
+            if (keys.w) moveDir.z -= 1;
+            if (keys.s) moveDir.z += 1;
+            if (keys.a) moveDir.x -= 1;
+            if (keys.d) moveDir.x += 1;
+            
+            moveDir.normalize();
+            camera.translateZ(moveDir.z * flySpeed * delta);
+            camera.translateX(moveDir.x * flySpeed * delta);
+            if (keys.q) camera.position.y += flySpeed * delta;
+            if (keys.e) camera.position.y -= flySpeed * delta;
+
+            updateChunks();
             renderer.render(scene, camera);
         }
+
         init();
     </script>
 </body>
