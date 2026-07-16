@@ -3,34 +3,72 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Terrain Simulation</title>
+    <title>8K Terrain Loader</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        body { margin: 0; overflow: hidden; background: #050505; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        
+        #loading-screen {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: #000;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            transition: opacity 0.8s ease;
+        }
+
+        #loader-bar-container {
+            width: 300px;
+            height: 4px;
+            background: #222;
+            border-radius: 2px;
+            margin-top: 20px;
+            overflow: hidden;
+        }
+
+        #loader-bar {
+            width: 0%;
+            height: 100%;
+            background: #4ade80;
+            transition: width 0.3s;
+        }
+
+        #loading-text { color: #888; font-size: 12px; letter-spacing: 2px; text-transform: uppercase; margin-top: 10px; }
+
         #ui {
             position: absolute;
             top: 20px;
             left: 20px;
             color: white;
-            background: rgba(0,0,0,0.85);
+            background: rgba(0,0,0,0.8);
             padding: 15px;
             border-radius: 8px;
             pointer-events: none;
-            border: 1px solid #444;
+            border: 1px solid #333;
             backdrop-filter: blur(10px);
+            display: none;
         }
-        .coords { font-family: monospace; color: #4ade80; margin-top: 5px; font-size: 14px; }
-        .controls { font-size: 11px; margin-top: 10px; color: #bbb; line-height: 1.5; }
+
+        .coords { font-family: monospace; color: #4ade80; font-size: 14px; margin-top: 4px; }
+        .controls { font-size: 11px; margin-top: 10px; color: #999; line-height: 1.5; }
         canvas { display: block; }
     </style>
 </head>
 <body>
 
+    <div id="loading-screen">
+        <div id="loader-bar-container"><div id="loader-bar"></div></div>
+        <div id="loading-text">Preloading 8K Assets...</div>
+    </div>
+
     <div id="ui">
-        <strong>Infinite 8K Grassland</strong>
+        <strong>8K Infinite Grassland</strong>
         <div id="coords" class="coords">X: 0, Y: 0, Z: 0</div>
         <div class="controls">
-            WASD: Fly | Q/E: Up/Down<br>
-            Mouse: Look | Click: Lock
+            WASD: Fly | Q/E: Vertical<br>
+            Mouse: Look | Click: Engage
         </div>
     </div>
 
@@ -47,33 +85,45 @@
             roughness: BASE_URL + 'GrassR.jpg'
         };
 
-        const CHUNK_SIZE = 120;
+        const CHUNK_SIZE = 150;
         const SEGMENTS = 180; 
         const RENDER_DISTANCE = 2; 
-        const TILING = 1.5; 
+        const TILING = 1.0; 
 
-        let scene, camera, renderer, clock, loader;
+        let scene, camera, renderer, clock, manager;
         let chunks = new Map();
         let keys = { w: false, a: false, s: false, d: false, q: false, e: false };
         let textures = {};
+        let isLoaded = false;
 
         function init() {
             scene = new THREE.Scene();
-
-            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 4000);
-            camera.position.set(0, 30, 0);
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 5000);
+            camera.position.set(0, 50, 0);
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             renderer.outputEncoding = THREE.sRGBEncoding;
             renderer.toneMapping = THREE.ACESFilmicToneMapping;
-            renderer.toneMappingExposure = 0.35;
-            
+            renderer.toneMappingExposure = 0.3;
             document.body.appendChild(renderer.domElement);
 
-            loader = new THREE.TextureLoader();
+            manager = new THREE.LoadingManager();
+            const loader = new THREE.TextureLoader(manager);
             loader.setCrossOrigin('anonymous');
+
+            manager.onProgress = (url, itemsLoaded, itemsTotal) => {
+                const progress = (itemsLoaded / itemsTotal) * 100;
+                document.getElementById('loader-bar').style.width = progress + '%';
+            };
+
+            manager.onLoad = () => {
+                isLoaded = true;
+                document.getElementById('loading-screen').style.opacity = '0';
+                document.getElementById('ui').style.display = 'block';
+                setTimeout(() => { document.getElementById('loading-screen').remove(); }, 800);
+            };
 
             loader.load(ASSETS.sky, (tex) => {
                 tex.mapping = THREE.EquirectangularReflectionMapping;
@@ -91,22 +141,19 @@
                 });
             });
 
-            const ambient = new THREE.AmbientLight(0xffffff, 0.1);
-            scene.add(ambient);
-
-            const sun = new THREE.DirectionalLight(0xffffff, 0.7);
+            scene.add(new THREE.AmbientLight(0xffffff, 0.05));
+            const sun = new THREE.DirectionalLight(0xffffff, 0.6);
             sun.position.set(200, 400, 200);
             scene.add(sun);
 
             clock = new THREE.Clock();
-
             setupControls();
             window.addEventListener('resize', onWindowResize);
             animate();
         }
 
         function getBaseHeight(x, z) {
-            return (Math.sin(x * 0.008) * Math.cos(z * 0.008) * 20) + (Math.sin(x * 0.02) * 5);
+            return (Math.sin(x * 0.005) * Math.cos(z * 0.005) * 30) + (Math.sin(x * 0.015) * 8);
         }
 
         function createChunk(x, z) {
@@ -129,10 +176,10 @@
                 roughnessMap: textures.roughness,
                 aoMap: textures.ao,
                 displacementMap: textures.displacement,
-                displacementScale: 15.0, 
-                displacementBias: -6.0,
-                normalScale: new THREE.Vector2(5.0, 5.0),
-                aoMapIntensity: 2.5,
+                displacementScale: 18.0, 
+                displacementBias: -8.0,
+                normalScale: new THREE.Vector2(6.0, 6.0),
+                aoMapIntensity: 3.0,
                 roughness: 1.0
             });
 
@@ -142,7 +189,7 @@
         }
 
         function updateChunks() {
-            if (!textures.color) return;
+            if (!isLoaded) return;
 
             const curX = Math.round(camera.position.x / CHUNK_SIZE);
             const curZ = Math.round(camera.position.z / CHUNK_SIZE);
@@ -201,8 +248,10 @@
 
         function animate() {
             requestAnimationFrame(animate);
+            if (!isLoaded) return;
+
             const delta = clock.getDelta();
-            const flySpeed = 100.0;
+            const flySpeed = 120.0;
 
             const moveDir = new THREE.Vector3();
             if (keys.w) moveDir.z -= 1;
